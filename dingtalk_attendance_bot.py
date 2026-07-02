@@ -393,7 +393,7 @@ def main():
         leave_set = set(leave_names)
         not_punched_out = [n for n in not_punched_out if n not in leave_set]
         late_today = [n for n in late_today if n not in leave_set]
-        absent_today = [n for n in absent_today if n not in leave_set]
+        absent_today = list(set(absent_today + leave_names))
         
         # 步骤4.5: 过滤白名单（白名单人员不参与考勤统计）
         white_set = set(WHITE_LIST_NAMES)
@@ -411,16 +411,13 @@ def main():
             print("  用户列表为空，发送提示消息")
         else:
             report = f"""【考勤通报】
-1.昨日下班未打卡人员（不含请假人员）：
+1.昨日下班未打卡人员：
 {names_to_text(not_punched_out)}
 
-2.今天请假人员：
-{names_to_text(leave_names)}
-
-3.今天迟到人员（不含请假人员）：
+2.今天迟到人员：
 {names_to_text(late_today)}
 
-4.今天缺勤人员（不含请假人员）：
+3.今天缺勤人员（含请假）：
 {names_to_text(absent_today)}
 """
         print("\n" + report)
