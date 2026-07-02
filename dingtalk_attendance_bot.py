@@ -31,6 +31,11 @@ AGENT_ID = 4727999209                         # AgentId
 # 考勤白名单（这些人员不参与考勤统计，如高管、外包等，填写姓名）
 WHITE_LIST_NAMES = ["陈迪煊"]
 
+# 请假审批流程编码（需要在钉钉管理后台找到请假模板的流程编码）
+# 注意：这是"流程编码"不是"表单ID"
+# 可在钉钉管理后台→工作台→审批→请假→编辑→地址栏找processCode=
+LEAVE_PROCESS_CODE = None
+
 # 要发送的群（好达团队管理部群的ID已配好，好达群请补充）
 GROUPS = [
     {"name": "好达团队管理部", "webhook_url": "https://oapi.dingtalk.com/robot/send?access_token=7c605bd0e0dc82f15d9f5e95ab004797d077d38a83db7ebc5a6cbc70c8aec87e", "secret": "SEC2eed60acaf221629aa4f55986d5cec9aa76f526634caec60f4149333ce329e7b"},
@@ -197,12 +202,15 @@ class DingTalkClient:
         
         return all_records
     
-    def get_leave_user_ids(self, start_ms: int, end_ms: int) -> List[str]:
+    def get_leave_user_ids(self, start_ms: int, end_ms: int, process_code: str = None) -> List[str]:
         """获取请假人员的userid列表"""
+        if not process_code:
+            print(f"  ⚠ 未配置请假流程编码，跳过请假数据获取")
+            return []
         try:
             # 获取请假审批实例ID列表（请假模板process_code，不同企业可能不同）
             data = self._request("POST", "/topapi/processinstance/listids", json_data={
-                "process_code": "PROC-1F9DD448-ECC6-4529-BF85-1280EF80946E",
+                "process_code": process_code,
                 "start_time": start_ms,
                 "end_time": end_ms,
                 "size": 100
@@ -377,7 +385,7 @@ def main():
         today_start = date_to_ms(today)
         today_end = today_start + 86400000
         
-        leave_user_ids = client.get_leave_user_ids(today_start, today_end) if user_ids else []
+        leave_user_ids = client.get_leave_user_ids(today_start, today_end, LEAVE_PROCESS_CODE) if user_ids else []
         leave_names = [name_map.get(uid, uid) for uid in leave_user_ids]
         print(f"  请假人数: {len(leave_names)}")
         
