@@ -181,24 +181,23 @@ class DingTalkClient:
     def get_attendance_list(self, work_date: str, user_ids: List[str]) -> List[Dict]:
         if not user_ids:
             return []
-        """获取指定日期的打卡结果"""
+        """获取指定日期的打卡结果（分批查询，避免超时）"""
         all_records = []
-        offset = 0
+        batch_size = 20
         
-        while True:
-            data = self._request("POST", "/attendance/list", json_data={
-                "workDateFrom": work_date + " 00:00:00",
-                "workDateTo": work_date + " 23:59:59",
-                "userIdList": user_ids,
-                "offset": offset,
-                "limit": 50
-            })
-            records = data.get("recordresult", [])
-            all_records.extend(records)
-            
-            if len(records) < 50:
-                break
-            offset += 50
+        for i in range(0, len(user_ids), batch_size):
+            batch = user_ids[i:i + batch_size]
+            try:
+                data = self._request("POST", "/attendance/list", json_data={
+                    "workDateFrom": work_date + " 00:00:00",
+                    "workDateTo": work_date + " 23:59:59",
+                    "userIdList": batch,
+                    "offset": 0,
+                    "limit": 50
+                })
+                all_records.extend(data.get("recordresult", []))
+            except Exception as e:
+                print(f"  ⚠ 考勤分批查询({i//batch_size+1})失败: {e}")
         
         return all_records
     
@@ -363,7 +362,7 @@ def main():
             user_recs = [r for r in records if r.get("userId") == uid]
             if user_recs:
                 # 检查下班打卡
-                has_checkout = any(r.get("checkType") == "OffDuty" for r in user_recs)
+                has_checkout = any(r.get("checkType") == "OffDuty" and r.get("timeResult") == "Normal" for r in user_recs)
                 if not has_checkout:
                     not_punched_out.append(name)
         
