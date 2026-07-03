@@ -352,8 +352,8 @@ def main():
         records = client.get_attendance_list(yesterday, user_ids)
         
         # 分析打卡情况
-        not_punched_out = []  # 下班未打卡
         late_today = []       # 今早上班迟到
+        not_punched_out = []  # 下班未打卡（统计但不再展示）
         absent_today = []     # 今天缺勤
         all_punched_today = set()
         
@@ -390,14 +390,12 @@ def main():
         
         # 步骤4: 去除请假人员
         leave_set = set(leave_names)
-        not_punched_out = [n for n in not_punched_out if n not in leave_set]
         late_today = [n for n in late_today if n not in leave_set]
         absent_today = list(set(absent_today + leave_names))
         
         # 步骤4.5: 过滤白名单（白名单人员不参与考勤统计）
         white_set = set(WHITE_LIST_NAMES)
         if white_set:
-            not_punched_out = [n for n in not_punched_out if n not in white_set]
             late_today = [n for n in late_today if n not in white_set]
             absent_today = [n for n in absent_today if n not in white_set]
             leave_names = [n for n in leave_names if n not in white_set]
@@ -410,13 +408,10 @@ def main():
             print("  用户列表为空，发送提示消息")
         else:
             report = f"""【考勤通报】
-1.昨日下班未打卡人员：
-{names_to_text(not_punched_out)}
-
-2.今天迟到人员：
+1.今天上午迟到人员：
 {names_to_text(late_today)}
 
-3.今天缺勤人员（含请假）：
+2.今天缺勤人员（含请假）：
 {names_to_text(absent_today)}
 """
         print("\n" + report)
