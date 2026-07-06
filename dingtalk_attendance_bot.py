@@ -103,8 +103,7 @@ class DingTalkClient:
         url = f"https://oapi.dingtalk.com{path}"
         
         resp = requests.request(
-            method, url,
-            params={"access_token": token},
+            method, url + "?access_token=" + token,
             json=json_data,
             headers={"Content-Type": "application/json"},
             timeout=15
@@ -187,17 +186,23 @@ class DingTalkClient:
         
         for i in range(0, len(user_ids), batch_size):
             batch = user_ids[i:i + batch_size]
-            try:
-                data = self._request("POST", "/attendance/list", json_data={
-                    "workDateFrom": work_date + " 00:00:00",
-                    "workDateTo": work_date + " 23:59:59",
-                    "userIdList": batch,
-                    "offset": 0,
-                    "limit": 50
-                })
-                all_records.extend(data.get("recordresult", []))
-            except Exception as e:
-                print(f"  ⚠ 考勤分批查询({i//batch_size+1})失败: {e}")
+            # 重试3次
+            for retry in range(3):
+                try:
+                    data = self._request("POST", "/attendance/list", json_data={
+                        "workDateFrom": work_date + " 00:00:00",
+                        "workDateTo": work_date + " 23:59:59",
+                        "userIdList": batch,
+                        "offset": 0,
+                        "limit": 50
+                    })
+                    all_records.extend(data.get("recordresult", []))
+                    break
+                except Exception as e:
+                    if retry < 2:
+                        time.sleep(1)
+                    else:
+                        print(f"  ⚠ 考勤分批查询({i//batch_size+1})失败(重试{retry+1}次): {e}")
         
         return all_records
     
