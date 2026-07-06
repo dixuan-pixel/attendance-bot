@@ -180,13 +180,12 @@ class DingTalkClient:
     def get_attendance_list(self, work_date: str, user_ids: List[str]) -> List[Dict]:
         if not user_ids:
             return []
-        """获取指定日期的打卡结果（分批查询，避免超时）"""
+        """获取指定日期的打卡结果（分批查询+延时，避免限流）"""
         all_records = []
-        batch_size = 20
+        batch_size = 10
         
         for i in range(0, len(user_ids), batch_size):
             batch = user_ids[i:i + batch_size]
-            # 重试3次
             for retry in range(3):
                 try:
                     data = self._request("POST", "/attendance/list", json_data={
@@ -200,9 +199,10 @@ class DingTalkClient:
                     break
                 except Exception as e:
                     if retry < 2:
-                        time.sleep(1)
+                        time.sleep(2)
                     else:
-                        print(f"  ⚠ 考勤分批查询({i//batch_size+1})失败(重试{retry+1}次): {e}")
+                        print(f"  ⚠ 考勤查询失败(批次{i//batch_size+1}): {e}")
+            time.sleep(1)
         
         return all_records
     
