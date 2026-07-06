@@ -36,6 +36,10 @@ WHITE_LIST_NAMES = ["陈迪煊"]
 # 可在钉钉管理后台→工作台→审批→请假→编辑→地址栏找processCode=
 LEAVE_PROCESS_CODE = None
 
+# 手动请假名单（API获取不到请假数据时，每天手动填写请假人员姓名）
+# 每天上班前修改这个列表，填入当天请假的人员姓名
+MANUAL_LEAVE_NAMES = []
+
 # 要发送的群（好达团队管理部群的ID已配好，好达群请补充）
 GROUPS = [
     {"name": "好达团队管理部", "webhook_url": "https://oapi.dingtalk.com/robot/send?access_token=7c605bd0e0dc82f15d9f5e95ab004797d077d38a83db7ebc5a6cbc70c8aec87e", "secret": "SEC2eed60acaf221629aa4f55986d5cec9aa76f526634caec60f4149333ce329e7b"},
@@ -398,7 +402,17 @@ def main():
         late_today = [n for n in late_today if n not in leave_set]
         absent_today = list(set(absent_today + leave_names))
         
-        # 步骤4.5: 过滤白名单（白名单人员不参与考勤统计）
+        # 步骤4.5: 手动添加请假人员（API获取不到时可手动填写）
+        if MANUAL_LEAVE_NAMES:
+            for name in MANUAL_LEAVE_NAMES:
+                if name not in leave_names:
+                    leave_names.append(name)
+            # 重新计算absent_today（包含请假）
+            for name in MANUAL_LEAVE_NAMES:
+                if name not in absent_today:
+                    absent_today.append(name)
+        
+        # 步骤4.6: 过滤白名单（白名单人员不参与考勤统计）
         white_set = set(WHITE_LIST_NAMES)
         if white_set:
             late_today = [n for n in late_today if n not in white_set]
