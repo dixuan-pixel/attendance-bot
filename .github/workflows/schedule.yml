@@ -1,0 +1,15 @@
+name: 钉钉考勤通报
+on:
+  schedule:
+    - cron: '32 1 * * 1-5'
+  workflow_dispatch:
+jobs:
+  attendance:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: 运行考勤通报
+        run: python dingtalk_attendance_bot.py
