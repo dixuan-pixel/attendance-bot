@@ -153,20 +153,27 @@ class DingTalkClient:
             except:
                 if retry < 2:
                     time.sleep(3)
+                else:
+                    depts = [{"dept_id": 1}]
         
-        # 从每个部门获取成员（逐个用户查，避免超限）
-        for dept in depts[:1]:  # 只查第一个部门（根部门）
+        # 从每个部门获取成员（分页遍历，避免遗漏）
+        for dept in depts:
             did = dept.get("dept_id", 1)
-            try:
-                data = self._request("POST", "/topapi/v2/user/list", json_data={
-                    "dept_id": did,
-                    "cursor": 0,
-                    "size": 100
-                })
-                result = data.get("result", {})
-                users.extend(result.get("list", []))
-            except:
-                pass
+            cursor = 0
+            has_more = True
+            while has_more:
+                try:
+                    data = self._request("POST", "/topapi/v2/user/list", json_data={
+                        "dept_id": did,
+                        "cursor": cursor,
+                        "size": 100
+                    })
+                    result = data.get("result", {})
+                    users.extend(result.get("list", []))
+                    cursor = result.get("cursor", 0)
+                    has_more = result.get("has_more", False)
+                except:
+                    break
         
         return users
     
@@ -376,6 +383,9 @@ def main():
         
         # 获取今天的打卡记录
         today_records = client.get_attendance_list(today, user_ids)
+        if len(today_records) == 0:
+            print("  ⚠ 今日考勤数据获取失败，跳过发送")
+            return
         today_punched = set()
         for r in today_records:
             today_punched.add(r.get("userId"))
