@@ -406,16 +406,20 @@ def main():
             if uid not in today_punched:
                 absent_today.append(name_map.get(uid, uid))
         
-        # 步骤3: 获取请假人员（通过考勤请假时长API，无需审批权限）
-        print(f"[3/4] 获取今日请假人员...")
-        leave_user_ids = client.get_leave_user_ids(user_ids, today) if user_ids else []
-        leave_names = [name_map.get(uid, uid) for uid in leave_user_ids]
-        print(f"  请假人数: {len(leave_names)}")
+        # 步骤3: 获取请假人员（今明两天分别查询）
+        print(f"[3/4] 获取请假人员...")
+        # 今日请假（用于过滤迟到/缺勤）
+        leave_user_ids_today = client.get_leave_user_ids(user_ids, today) if user_ids else []
+        leave_names = [name_map.get(uid, uid) for uid in leave_user_ids_today]
+        # 昨日请假（用于过滤昨日下班未打卡）
+        leave_user_ids_yesterday = client.get_leave_user_ids(user_ids, yesterday) if user_ids else []
+        leave_names_yesterday = set(name_map.get(uid, uid) for uid in leave_user_ids_yesterday)
+        print(f"  今日请假: {len(leave_names)}人, 昨日请假: {len(leave_names_yesterday)}人")
         
-        # 步骤4: 过滤请假人员（请假人员不计入迟到/缺勤/未打卡）
+        # 步骤4: 过滤请假人员
         leave_set = set(leave_names)
         late_today = [n for n in late_today if n not in leave_set]
-        not_punched_out = [n for n in not_punched_out if n not in leave_set]
+        not_punched_out = [n for n in not_punched_out if n not in leave_names_yesterday]  # 用昨天的请假过滤昨天的未打卡
         absent_today = [n for n in absent_today if n not in leave_set]
         
         # 步骤4.5: 过滤白名单（白名单人员不参与考勤统计）
