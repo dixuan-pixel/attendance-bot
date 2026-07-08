@@ -34,7 +34,8 @@ WHITE_LIST_NAMES = ["陈迪煊"]
 # 请假审批流程编码（需要在钉钉管理后台找到请假模板的流程编码）
 # 注意：这是"流程编码"不是"表单ID"
 # 可在钉钉管理后台→工作台→审批→请假→编辑→地址栏找processCode=
-LEAVE_PROCESS_CODE = "PROC-1F9DD448-ECC6-4529-BF85-1280EF80946E"
+# 请假人员通过考勤API直接获取（getleaveapproveduration），无需审批权限
+LEAVE_PROCESS_CODE = None  # 已弃用，保留兼容性
 
 
 # 要发送的群（好达团队管理部群的ID已配好，好达群请补充）
@@ -216,41 +217,25 @@ class DingTalkClient:
         
         return all_records
     
-    def get_leave_user_ids(self, start_ms: int, end_ms: int, process_code: str = None) -> List[str]:
-        """获取请假人员的userid列表"""
-        if not process_code:
-            print(f"  ⚠ 未配置请假流程编码，跳过请假数据获取")
+    def get_leave_user_ids(self, user_ids: List[str], today_date: str) -> List[str]:
+        """通过考勤请假时长API获取当天请假人员（无需审批权限）"""
+        if not user_ids:
             return []
-        try:
-            # 获取请假审批实例ID列表（请假模板process_code，不同企业可能不同）
-            data = self._request("POST", "/topapi/processinstance/listids", json_data={
-                "process_code": process_code,
-                "start_time": start_ms,
-                "end_time": end_ms,
-                "size": 100
-            })
-            instance_ids = data.get("result", {}).get("list", [])
-            if not instance_ids:
-                return []
-            
-            # 获取每个审批实例的详情，提取申请人
-            leave_user_ids = set()
-            for pid in instance_ids[:30]:
-                try:
-                    detail = self._request("POST", "/topapi/processinstance/get", json_data={
-                        "process_instance_id": pid
-                    })
-                    pi = detail.get("process_instance", {})
-                    # 只统计已同意（COMPLETED + agree）的请假
-                    if pi.get("status") == "COMPLETED" and pi.get("result") == "agree":
-                        leave_user_ids.add(pi.get("originator_userid"))
-                except:
-                    pass
-            
-            return list(leave_user_ids)
-        except Exception as e:
-            print(f"  ⚠ 获取请假数据失败: {e}")
-            return []
+        leave_user_ids = []
+        for uid in user_ids:
+            try:
+                data = self._request("POST", "/topapi/attendance/getleaveapproveduration", json_data={
+                    "userid": uid,
+                    "from_date": today_date,
+                    "to_date": today_date
+                })
+                duration = data.get("result", {}).get("duration_in_minutes", 0)
+                if duration > 0:
+                    leave_user_ids.append(uid)
+            except:
+                pass
+            time.sleep(0.15)  # 避免频率限制
+        return leave_user_ids
     
     def get_time_attendance_report(self, start_date: str, end_date: str, user_ids: List[str]) -> List[Dict]:
         """获取考勤报表"""
@@ -397,12 +382,9 @@ def main():
             if uid not in today_punched:
                 absent_today.append(name_map.get(uid, uid))
         
-        # 步骤3: 获取请假人员
+        # 步骤3: 获取请假人员（通过考勤请假时长API，无需审批权限）
         print(f"[3/4] 获取今日请假人员...")
-        today_start = date_to_ms(today)
-        today_end = today_start + 86400000
-        
-        leave_user_ids = client.get_leave_user_ids(today_start, today_end, LEAVE_PROCESS_CODE) if user_ids else []
+        leave_user_ids = client.get_leave_user_ids(user_ids, today) if user_ids else []
         leave_names = [name_map.get(uid, uid) for uid in leave_user_ids]
         print(f"  请假人数: {len(leave_names)}")
         
