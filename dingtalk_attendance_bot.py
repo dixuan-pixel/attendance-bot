@@ -240,10 +240,10 @@ class DingTalkClient:
                     detail = self._request("POST", "/topapi/processinstance/get", json_data={
                         "process_instance_id": pid
                     })
-                    result = detail.get("result", {})
-                    # 只统计已同意的请假
-                    if result.get("status") == "COMPLETED" and result.get("result") == "agree":
-                        leave_user_ids.add(result.get("originator_userid"))
+                    pi = detail.get("process_instance", {})
+                    # 只统计已同意（COMPLETED + agree）的请假
+                    if pi.get("status") == "COMPLETED" and pi.get("result") == "agree":
+                        leave_user_ids.add(pi.get("originator_userid"))
                 except:
                     pass
             
