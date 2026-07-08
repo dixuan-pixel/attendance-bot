@@ -406,14 +406,16 @@ def main():
         leave_names = [name_map.get(uid, uid) for uid in leave_user_ids]
         print(f"  请假人数: {len(leave_names)}")
         
-        # 步骤4: 去除请假人员
+        # 步骤4: 过滤请假人员（请假人员不计入迟到/缺勤/未打卡）
         leave_set = set(leave_names)
         late_today = [n for n in late_today if n not in leave_set]
-        absent_today = list(set(absent_today + leave_names))
+        not_punched_out = [n for n in not_punched_out if n not in leave_set]
+        absent_today = [n for n in absent_today if n not in leave_set]
         
         # 步骤4.5: 过滤白名单（白名单人员不参与考勤统计）
         white_set = set(WHITE_LIST_NAMES)
         if white_set:
+            not_punched_out = [n for n in not_punched_out if n not in white_set]
             late_today = [n for n in late_today if n not in white_set]
             absent_today = [n for n in absent_today if n not in white_set]
             leave_names = [n for n in leave_names if n not in white_set]
@@ -426,10 +428,16 @@ def main():
             print("  用户列表为空，发送提示消息")
         else:
             report = f"""【考勤通报】
-1.今天上午迟到人员：
+1.昨日下班未打卡人员：
+{names_to_text(not_punched_out)}
+
+2.今天请假人员：
+{names_to_text(leave_names)}
+
+3.今天迟到人员：
 {names_to_text(late_today)}
 
-2.今天缺勤人员（含请假）：
+4.今天缺勤人员：
 {names_to_text(absent_today)}
 """
         print("\n" + report)
