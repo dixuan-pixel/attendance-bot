@@ -34,7 +34,7 @@ WHITE_LIST_NAMES = ["陈迪煊"]
 # 请假审批流程编码（需要在钉钉管理后台找到请假模板的流程编码）
 # 注意：这是"流程编码"不是"表单ID"
 # 可在钉钉管理后台→工作台→审批→请假→编辑→地址栏找processCode=
-LEAVE_PROCESS_CODE = None
+LEAVE_PROCESS_CODE = "PROC-1F9DD448-ECC6-4529-BF85-1280EF80946E"
 
 
 # 要发送的群（好达团队管理部群的ID已配好，好达群请补充）
