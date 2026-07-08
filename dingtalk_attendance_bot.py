@@ -217,25 +217,49 @@ class DingTalkClient:
         
         return all_records
     
-    def get_leave_user_ids(self, user_ids: List[str], today_date: str) -> List[str]:
-        """通过考勤请假时长API获取当天请假人员（无需审批权限）"""
+    def get_leave_user_ids(self, user_ids: List[str], date_str: str) -> List[str]:
+        """通过请假状态API获取当天请假人员（无需审批权限）
+
+        使用 getleavestatus API，批量查询指定日期内所有用户的请假状态，
+        筛选出请假时段覆盖当天的用户。支持分页。
+        """
         if not user_ids:
             return []
-        leave_user_ids = []
-        for uid in user_ids:
-            try:
-                data = self._request("POST", "/topapi/attendance/getleaveapproveduration", json_data={
-                    "userid": uid,
-                    "from_date": today_date,
-                    "to_date": today_date
-                })
-                duration = data.get("result", {}).get("duration_in_minutes", 0)
-                if duration > 0:
-                    leave_user_ids.append(uid)
-            except:
-                pass
-            time.sleep(0.15)  # 避免频率限制
-        return leave_user_ids
+
+        # 计算当天 00:00:00 到 23:59:59 的 Unix 时间戳（毫秒）
+        from datetime import datetime as dt
+        today_start = dt.strptime(date_str + " 00:00:00", "%Y-%m-%d %H:%M:%S")
+        today_end = dt.strptime(date_str + " 23:59:59", "%Y-%m-%d %H:%M:%S")
+        start_ms = int(today_start.timestamp() * 1000)
+        end_ms = int(today_end.timestamp() * 1000)
+
+        leave_user_ids = set()
+        userid_str = ",".join(user_ids)
+        offset = 0
+        has_more = True
+
+        while has_more:
+            data = self._request("POST", "/topapi/attendance/getleavestatus", json_data={
+                "userid_list": userid_str,
+                "start_time": start_ms,
+                "end_time": end_ms,
+                "offset": offset,
+                "size": 20
+            })
+            result = data.get("result", {})
+            has_more = result.get("has_more", False)
+
+            for leave in result.get("leave_status", []):
+                uid = leave.get("userid")
+                ls = leave.get("start_time", 0)
+                le = leave.get("end_time", 0)
+                # 请假时段与当天有交集即视为今日请假
+                if ls <= end_ms and le >= start_ms:
+                    leave_user_ids.add(uid)
+
+            offset += 20
+
+        return list(leave_user_ids)
     
     def get_time_attendance_report(self, start_date: str, end_date: str, user_ids: List[str]) -> List[Dict]:
         """获取考勤报表"""
