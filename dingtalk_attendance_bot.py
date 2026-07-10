@@ -321,60 +321,44 @@ class DingTalkClient:
 
 # ========== 工具函数 ==========
 
-def is_weekday(dt: datetime) -> bool:
-    """判断是否工作日（周一至周五）"""
-    return dt.weekday() < 5
-
-
-# 2026年中国法定节假日（来源：国务院办公厅通知 国办发明电〔2025〕7号）
-_HOLIDAYS_2026 = {
-    # 元旦: 1月1日-3日
-    "2026-01-01", "2026-01-02", "2026-01-03",
-    # 春节: 2月15日-23日
-    "2026-02-15", "2026-02-16", "2026-02-17", "2026-02-18", "2026-02-19",
-    "2026-02-20", "2026-02-21", "2026-02-22", "2026-02-23",
-    # 清明节: 4月4日-6日
-    "2026-04-04", "2026-04-05", "2026-04-06",
-    # 劳动节: 5月1日-5日
-    "2026-05-01", "2026-05-02", "2026-05-03", "2026-05-04", "2026-05-05",
-    # 端午节: 6月19日-21日
-    "2026-06-19", "2026-06-20", "2026-06-21",
-    # 中秋节: 9月25日-27日
-    "2026-09-25", "2026-09-26", "2026-09-27",
-    # 国庆节: 10月1日-7日
-    "2026-10-01", "2026-10-02", "2026-10-03", "2026-10-04",
-    "2026-10-05", "2026-10-06", "2026-10-07",
-}
-
-# 2026年调休上班日（周末补班，需要正常发考勤）
-_MAKEUP_WORKDAYS_2026 = {
-    "2026-01-04",   # 元旦调休（周日上班）
-    "2026-02-14",   # 春节调休（周六上班）
-    "2026-02-28",   # 春节调休（周六上班）
-    "2026-05-09",   # 劳动节调休（周六上班）
-    "2026-09-20",   # 国庆调休（周日上班）
-    "2026-10-10",   # 国庆调休（周六上班）
-}
-
-
 def should_skip_today(date_str: str = None) -> tuple:
-    """判断今天是否需要跳过考勤通报
-    返回 (是否跳过, 原因)
+    """通过免费节假日API判断今天是否需要跳过考勤通报。
+    
+    使用 UAPI (uapis.cn) 免费接口，无需注册，自动覆盖：
     - 法定节假日 → 跳过
-    - 普通周末（非调休）→ 跳过
-    - 调休工作日 → 不跳过
+    - 普通周末 → 跳过
+    - 调休工作日（如周六补班）→ 不跳过
     - 普通工作日 → 不跳过
+    
+    API 不可用时回退到简单周末判断。
+    返回 (是否跳过, 原因)
     """
     if date_str is None:
         date_str = datetime.now().strftime("%Y-%m-%d")
-    dt = datetime.strptime(date_str, "%Y-%m-%d")
 
-    if date_str in _HOLIDAYS_2026:
-        return True, "法定节假日"
-    if date_str in _MAKEUP_WORKDAYS_2026:
-        return False, ""  # 调休上班，正常发送
+    try:
+        resp = requests.get(
+            "https://uapis.cn/api/v1/misc/holiday-calendar",
+            params={"date": date_str},
+            timeout=5
+        )
+        data = resp.json()
+        day = data.get("days", [{}])[0]
+        is_workday = day.get("is_workday", None)
+        if is_workday is True:
+            return False, ""
+        elif is_workday is False:
+            holiday_name = day.get("legal_holiday_name", "")
+            if holiday_name:
+                return True, f"法定节假日({holiday_name})"
+            return True, "周末"
+    except Exception as e:
+        print(f"[警告] 节假日API查询失败: {e}，回退到周末判断")
+
+    # API 失败时的回退：按周末判断
+    dt = datetime.strptime(date_str, "%Y-%m-%d")
     if dt.weekday() >= 5:
-        return True, "周末"
+        return True, "周末(离线判断)"
     return False, ""
 
 
