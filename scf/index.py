@@ -240,7 +240,11 @@ def should_skip_today(date_str: str = None) -> tuple:
 
 
 def format_yesterday() -> str:
-    return (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+    """获取上一个工作日。周一→上周五，其余→昨天。"""
+    today = datetime.now()
+    if today.weekday() == 0:  # 周一
+        return (today - timedelta(days=3)).strftime("%Y-%m-%d")
+    return (today - timedelta(days=1)).strftime("%Y-%m-%d")
 
 def format_today() -> str:
     return datetime.now().strftime("%Y-%m-%d")
