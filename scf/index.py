@@ -180,6 +180,78 @@ class DingTalkClient:
             offset += 20
         return list(leave_user_ids)
 
+    def _resolve_att_columns(self) -> Dict[str, int]:
+        """解析考勤报表列别名->列ID 映射（运行时动态获取，避免硬编码列ID）"""
+        cached = getattr(self, "_att_cols_cache", None)
+        if cached:
+            return cached
+        data = self._request("POST", "/topapi/attendance/getattcolumns", json_data={})
+        cols = data.get("result", [])
+        if isinstance(cols, dict):
+            cols = cols.get("columns", [])
+        mapping = {}
+        for c in cols:
+            alias = c.get("alias")
+            cid = c.get("id")
+            if alias and cid is not None:
+                mapping[alias] = cid
+        self._att_cols_cache = mapping
+        return mapping
+
+    def get_out_trip_users(self, user_ids: List[str], date_list: List[str]) -> Dict[str, set]:
+        """获取指定日期有「外出」或「出差」审批覆盖的用户（基于考勤报表口径）
+
+        返回 {日期: set(userid)}
+        """
+        result = {d: set() for d in (date_list or [])}
+        if not user_ids or not date_list:
+            return result
+
+        try:
+            col_map = self._resolve_att_columns()
+        except Exception as e:
+            print(f"  ⚠ 获取考勤报表列失败，跳过外出检测: {e}")
+            return result
+
+        out_col = col_map.get("out_time")
+        trip_col = col_map.get("business_trip_time")
+        col_ids = [str(c) for c in (out_col, trip_col) if c is not None]
+        if not col_ids:
+            print("  ⚠ 未找到外出/出差报表列，跳过外出检测")
+            return result
+
+        col_str = ",".join(col_ids)
+        from_date = min(date_list) + " 00:00:00"
+        to_date = max(date_list) + " 23:59:59"
+
+        for uid in user_ids:
+            for retry in range(3):
+                try:
+                    data = self._request("POST", "/topapi/attendance/getcolumnval", json_data={
+                        "userid": uid,
+                        "column_id_list": col_str,
+                        "from_date": from_date,
+                        "to_date": to_date
+                    })
+                    for item in data.get("result", {}).get("column_vals", []):
+                        for cv in item.get("column_vals", []):
+                            day = (cv.get("date") or "")[:10]
+                            try:
+                                val = float(cv.get("value") or 0)
+                            except (TypeError, ValueError):
+                                val = 0.0
+                            if day in result and val > 0:
+                                result[day].add(uid)
+                    break
+                except Exception as e:
+                    if retry < 2:
+                        time.sleep(2)
+                    else:
+                        print(f"  ⚠ 外出查询失败({uid}): {e}")
+            time.sleep(0.15)
+
+        return result
+
     def send_webhook_message(self, webhook_url: str, message: str, secret: str = "") -> dict:
         timestamp = str(int(round(time.time() * 1000)))
         sign = ""
@@ -302,11 +374,16 @@ def run_attendance_report() -> dict:
     leave_user_ids_yesterday = client.get_leave_user_ids(user_ids, yesterday) if user_ids else []
     leave_names_yesterday = set(name_map.get(uid, uid) for uid in leave_user_ids_yesterday)
 
-    # 步骤4: 过滤
+    # 步骤3.5: 获取外出/出差人员（考勤报表口径）
+    out_trip = client.get_out_trip_users(user_ids, [yesterday, today]) if user_ids else {}
+    out_names_yesterday = set(name_map.get(uid, uid) for uid in out_trip.get(yesterday, set()))
+    out_names_today = set(name_map.get(uid, uid) for uid in out_trip.get(today, set()))
+
+    # 步骤4: 过滤请假 + 外出/出差
     leave_set = set(leave_names)
-    late_today = [n for n in late_today if n not in leave_set]
-    not_punched_out = [n for n in not_punched_out if n not in leave_names_yesterday]
-    absent_today = [n for n in absent_today if n not in leave_set]
+    late_today = [n for n in late_today if n not in leave_set and n not in out_names_today]
+    not_punched_out = [n for n in not_punched_out if n not in leave_names_yesterday and n not in out_names_yesterday]
+    absent_today = [n for n in absent_today if n not in leave_set and n not in out_names_today]
 
     # 白名单过滤
     white_set = set(WHITE_LIST_NAMES)

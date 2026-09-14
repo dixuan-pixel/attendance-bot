@@ -261,6 +261,82 @@ class DingTalkClient:
 
         return list(leave_user_ids)
     
+    def _resolve_att_columns(self) -> Dict[str, int]:
+        """解析考勤报表列别名->列ID 映射（运行时动态获取，避免硬编码列ID）"""
+        cached = getattr(self, "_att_cols_cache", None)
+        if cached:
+            return cached
+        data = self._request("POST", "/topapi/attendance/getattcolumns", json_data={})
+        cols = data.get("result", [])
+        if isinstance(cols, dict):
+            cols = cols.get("columns", [])
+        mapping = {}
+        for c in cols:
+            alias = c.get("alias")
+            cid = c.get("id")
+            if alias and cid is not None:
+                mapping[alias] = cid
+        self._att_cols_cache = mapping
+        return mapping
+
+    def get_out_trip_users(self, user_ids: List[str], date_list: List[str]) -> Dict[str, set]:
+        """获取指定日期有「外出」或「出差」审批覆盖的用户（基于考勤报表口径）
+
+        外出/出差会体现在考勤报表的「外出时长」/「出差时长」列；
+        钉钉报表已把外出/出差时段从缺卡、旷工中剥离，因此只要当日
+        外出或出差时长 > 0，即视为该日考勤已由审批单覆盖，不计未打卡/缺勤。
+
+        返回 {日期: set(userid)}
+        """
+        result = {d: set() for d in (date_list or [])}
+        if not user_ids or not date_list:
+            return result
+
+        try:
+            col_map = self._resolve_att_columns()
+        except Exception as e:
+            print(f"  ⚠ 获取考勤报表列失败，跳过外出检测: {e}")
+            return result
+
+        out_col = col_map.get("out_time")            # 外出时长
+        trip_col = col_map.get("business_trip_time")  # 出差时长
+        col_ids = [str(c) for c in (out_col, trip_col) if c is not None]
+        if not col_ids:
+            print("  ⚠ 未找到外出/出差报表列，跳过外出检测")
+            return result
+
+        col_str = ",".join(col_ids)
+        from_date = min(date_list) + " 00:00:00"
+        to_date = max(date_list) + " 23:59:59"
+
+        for uid in user_ids:
+            for retry in range(3):
+                try:
+                    data = self._request("POST", "/topapi/attendance/getcolumnval", json_data={
+                        "userid": uid,
+                        "column_id_list": col_str,
+                        "from_date": from_date,
+                        "to_date": to_date
+                    })
+                    for item in data.get("result", {}).get("column_vals", []):
+                        for cv in item.get("column_vals", []):
+                            day = (cv.get("date") or "")[:10]
+                            try:
+                                val = float(cv.get("value") or 0)
+                            except (TypeError, ValueError):
+                                val = 0.0
+                            if day in result and val > 0:
+                                result[day].add(uid)
+                    break
+                except Exception as e:
+                    if retry < 2:
+                        time.sleep(2)
+                    else:
+                        print(f"  ⚠ 外出查询失败({uid}): {e}")
+            time.sleep(0.15)
+
+        return result
+
     def get_time_attendance_report(self, start_date: str, end_date: str, user_ids: List[str]) -> List[Dict]:
         """获取考勤报表"""
         all_results = []
@@ -455,12 +531,20 @@ def main():
         leave_user_ids_yesterday = client.get_leave_user_ids(user_ids, yesterday) if user_ids else []
         leave_names_yesterday = set(name_map.get(uid, uid) for uid in leave_user_ids_yesterday)
         print(f"  今日请假: {len(leave_names)}人, 昨日请假: {len(leave_names_yesterday)}人")
-        
-        # 步骤4: 过滤请假人员
+
+        # 步骤3.5: 获取外出/出差人员（按考勤报表口径，含外出单/出差单覆盖的时段）
+        print(f"[3.5/4] 获取外出/出差人员...")
+        out_trip = client.get_out_trip_users(user_ids, [yesterday, today]) if user_ids else {}
+        out_names_yesterday = set(name_map.get(uid, uid) for uid in out_trip.get(yesterday, set()))
+        out_names_today = set(name_map.get(uid, uid) for uid in out_trip.get(today, set()))
+        print(f"  今日外出/出差: {len(out_names_today)}人, 昨日外出/出差: {len(out_names_yesterday)}人")
+
+        # 步骤4: 过滤请假人员 + 外出/出差人员
         leave_set = set(leave_names)
-        late_today = [n for n in late_today if n not in leave_set]
-        not_punched_out = [n for n in not_punched_out if n not in leave_names_yesterday]  # 用昨天的请假过滤昨天的未打卡
-        absent_today = [n for n in absent_today if n not in leave_set]
+        late_today = [n for n in late_today if n not in leave_set and n not in out_names_today]
+        # 昨天下班未打卡：用昨天的请假 + 昨天的外出/出差过滤
+        not_punched_out = [n for n in not_punched_out if n not in leave_names_yesterday and n not in out_names_yesterday]
+        absent_today = [n for n in absent_today if n not in leave_set and n not in out_names_today]
         
         # 步骤4.5: 过滤白名单（白名单人员不参与考勤统计）
         white_set = set(WHITE_LIST_NAMES)
