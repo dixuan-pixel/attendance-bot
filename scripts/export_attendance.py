@@ -38,7 +38,7 @@ def parse(log):
         if m:
             current=int(m[1])-1;found.add(current);continue
         if not line:continue
-        if current<0 or re.match(r'^(✅|❌|⚠|##|Post job|Cleaning)',line):break
+        if current<0 or re.match(r'^(✅|❌|⚠|##|Post job|Cleaning|网页快照已生成)',line):break
         if line!='无':groups[current].extend(n.strip() for n in line.split('、') if n.strip())
     if len(found)!=4:return None
     total=re.search(r'找到 (\d+) 名成员',log)
@@ -46,11 +46,12 @@ def parse(log):
 def export_run(run):
     item={k:run[k] for k in ('id','created_at','status','conclusion')}
     item['report']=None
+    item['source']='web_only' if run['name']=='考勤网页快照' else 'group_report'
     if run['status']!='completed':
         item['reason']='任务正在运行';return item
     jobs=get(f"/actions/runs/{run['id']}/jobs?per_page=100")['jobs']
     for job in jobs:
-        if job['name']!='attendance':continue
+        if job['name'] not in ('attendance','snapshot'):continue
         try:
             log=get(f"/actions/jobs/{job['id']}/logs?nonce={time.time_ns()}",True)
         except urllib.error.HTTPError as e:
@@ -58,11 +59,18 @@ def export_run(run):
                 item['reason']='历史日志已过期';return item
             raise
         item['report']=parse(log)
+        metas=re.findall(r'SNAPSHOT_META=(\{[^\n]+\})',log)
+        if metas:
+            meta=json.loads(metas[-1])
+            item['collection_started']=meta.get('collection_started')
+            item['collected_at']=meta.get('collected_at')
         if item['report']:break
     if not item['report']:item['reason']='本次未生成通报，可能因休息日跳过或取数失败'
     return item
 if __name__=='__main__':
     runs=get('/actions/workflows/schedule.yml/runs?per_page=100')['workflow_runs']
+    runs+=get('/actions/workflows/snapshot.yml/runs?per_page=100')['workflow_runs']
+    runs=sorted(runs,key=lambda r:r['created_at'],reverse=True)[:100]
     with concurrent.futures.ThreadPoolExecutor(max_workers=5) as pool:
         records=list(pool.map(export_run,runs))
     Path('web').mkdir(exist_ok=True)

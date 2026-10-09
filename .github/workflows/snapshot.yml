@@ -1,0 +1,24 @@
+name: 考勤网页快照
+on:
+  workflow_dispatch:
+  schedule:
+    # UTC 01:01 = 北京时间 09:01；是否工作日由脚本判断。
+    - cron: "1 1 * * *"
+permissions:
+  contents: read
+concurrency:
+  group: attendance-web-snapshot
+  cancel-in-progress: false
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    env:
+      TZ: Asia/Shanghai
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install requests
+      - name: 读取最新考勤，仅更新网页
+        run: python dingtalk_attendance_bot.py --web-only

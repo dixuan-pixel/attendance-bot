@@ -470,7 +470,7 @@ def names_to_text(names: List[str], fallback: str = "无") -> str:
 
 # ========== 主函数 ==========
 
-def main():
+def main(send_messages: bool = True):
     print("=" * 50)
     print("钉钉考勤通报推送 v2.0")
     print("=" * 50)
@@ -481,6 +481,7 @@ def main():
 
     client = DingTalkClient(CLIENT_ID, CLIENT_SECRET, AGENT_ID)
     
+    collection_started = datetime.now(BEIJING_TZ).isoformat()
     yesterday = format_yesterday()
     today = format_today()
     
@@ -583,7 +584,11 @@ def main():
 4.今天缺勤人员：
 {names_to_text(absent_today)}
 """
+        print("SNAPSHOT_META=" + json.dumps({"collection_started": collection_started, "collected_at": datetime.now(BEIJING_TZ).isoformat(), "mode": "group_report" if send_messages else "web_only"}))
         print("\n" + report)
+        if not send_messages:
+            print("网页快照已生成，不发送群消息")
+            return
         
         # 步骤6: 发送到群
         failed_groups = []
@@ -615,4 +620,8 @@ if __name__ == "__main__":
     if skip:
         print(f"{datetime.now(BEIJING_TZ).strftime('%Y-%m-%d')} 是{reason}，跳过考勤通报")
     else:
-        main()
+        import argparse
+        parser = argparse.ArgumentParser()
+        parser.add_argument("--web-only", action="store_true", help="仅生成网页快照，不发送群消息")
+        args = parser.parse_args()
+        main(send_messages=not args.web_only)

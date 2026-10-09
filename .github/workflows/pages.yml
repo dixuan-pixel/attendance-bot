@@ -2,7 +2,7 @@ name: 更新考勤网页
 on:
   workflow_dispatch:
   workflow_run:
-    workflows: [钉钉考勤通报]
+    workflows: [钉钉考勤通报, 考勤网页快照]
     types: [completed]
   push:
     branches: [main]
