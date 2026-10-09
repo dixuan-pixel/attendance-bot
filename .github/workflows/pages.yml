@@ -1,0 +1,39 @@
+name: 更新考勤网页
+on:
+  workflow_dispatch:
+  workflow_run:
+    workflows: [钉钉考勤通报]
+    types: [completed]
+  push:
+    branches: [main]
+    paths: ['web/**', 'scripts/export_attendance.py', '.github/workflows/pages.yml']
+permissions:
+  contents: read
+  actions: read
+  pages: write
+  id-token: write
+concurrency:
+  group: attendance-pages
+  cancel-in-progress: false
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: 导出考勤结果
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python scripts/export_attendance.py
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: web
+      - name: 发布网页
+        id: deployment
+        uses: actions/deploy-pages@v4
