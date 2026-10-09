@@ -1,9 +1,6 @@
 name: 考勤网页快照
 on:
   workflow_dispatch:
-  schedule:
-    # UTC 01:01 = 北京时间 09:01；是否工作日由脚本判断。
-    - cron: "1 1 * * *"
 permissions:
   contents: read
 concurrency:
