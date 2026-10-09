@@ -4,3 +4,5 @@
 /* Compact results view: start directly with the date and refresh controls. */
 .content{padding-top:26px}.toolbar{margin-top:0}.toolbar-actions{display:flex;align-items:center;gap:12px}.toolbar-actions .refresh{margin-top:0}@media(max-width:760px){.toolbar-actions{width:100%;justify-content:space-between}}
 .results table{width:100%;border-collapse:collapse} .results th,.results td{text-align:left}
+/* Full-width attendance results, without sidebar. */
+.shell{display:block}main{width:100%}
