@@ -15,7 +15,9 @@ import time
 import hmac
 import hashlib
 import base64
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+
+BEIJING_TZ = timezone(timedelta(hours=8))
 from typing import Optional, Dict, List
 
 # ============================================================
@@ -100,13 +102,15 @@ class DingTalkClient:
                 dept_data = self._request("POST", "/topapi/v2/department/listsub", json_data={
                     "dept_id": 1, "language": "zh_CN"
                 })
-                depts = dept_data.get("result", []) if isinstance(dept_data.get("result"), list) else [{"dept_id": 1}]
+                depts = dept_data["result"]
+                if not isinstance(depts, list) or not depts:
+                    raise ValueError("部门列表为空或格式异常")
                 break
             except:
                 if retry < 2:
                     time.sleep(3)
                 else:
-                    depts = [{"dept_id": 1}]
+                    raise RuntimeError("部门列表查询失败")
 
         for dept in depts:
             did = dept.get("dept_id", 1)
@@ -117,43 +121,55 @@ class DingTalkClient:
                     data = self._request("POST", "/topapi/v2/user/list", json_data={
                         "dept_id": did, "cursor": cursor, "size": 100
                     })
-                    result = data.get("result", {})
-                    users.extend(result.get("list", []))
+                    result = data["result"]
+                    users.extend(result["list"])
                     cursor = result.get("cursor", 0)
                     has_more = result.get("has_more", False)
-                except:
-                    break
+                except Exception as e:
+                    raise RuntimeError(f"部门成员查询失败：{did}") from e
         return users
 
     def get_attendance_list(self, work_date: str, user_ids: List[str]) -> List[Dict]:
-        if not user_ids:
-            return []
+        """逐批逐页读取；任一页失败则终止，禁止用不完整数据生成通报。"""
         all_records = []
-        batch_size = 10
-        for i in range(0, len(user_ids), batch_size):
-            batch = user_ids[i:i + batch_size]
-            for retry in range(3):
-                try:
-                    data = self._request("POST", "/attendance/list", json_data={
-                        "workDateFrom": work_date + " 00:00:00",
-                        "workDateTo": work_date + " 23:59:59",
-                        "userIdList": batch,
-                        "offset": 0,
-                        "limit": 50
-                    })
-                    all_records.extend(data.get("recordresult", []))
-                    break
-                except Exception as e:
-                    if retry < 2:
+        for i in range(0, len(user_ids), 10):
+            batch = user_ids[i:i + 10]
+            offset = 0
+            while True:
+                for retry in range(3):
+                    try:
+                        data = self._request("POST", "/attendance/list", json_data={
+                            "workDateFrom": work_date + " 00:00:00",
+                            "workDateTo": work_date + " 23:59:59",
+                            "userIdList": batch,
+                            "offset": offset,
+                            "limit": 50
+                        })
+                        records = data["recordresult"]
+                        if not isinstance(records, list):
+                            raise ValueError("考勤记录格式异常")
+                        has_more = data.get("hasMore", False)
+                        if has_more and not records:
+                            raise ValueError("考勤分页返回空页但仍有下一页")
+                        break
+                    except Exception as e:
+                        if retry == 2:
+                            raise RuntimeError(
+                                f"考勤查询失败：{work_date} 批次{i // 10 + 1} offset={offset}"
+                            ) from e
                         time.sleep(2)
-            time.sleep(1)
+                all_records.extend(records)
+                time.sleep(1)
+                if not has_more:
+                    break
+                offset += len(records)
         return all_records
 
     def get_leave_user_ids(self, user_ids: List[str], date_str: str) -> List[str]:
         if not user_ids:
             return []
-        today_start = datetime.strptime(date_str + " 00:00:00", "%Y-%m-%d %H:%M:%S")
-        today_end = datetime.strptime(date_str + " 23:59:59", "%Y-%m-%d %H:%M:%S")
+        today_start = datetime.strptime(date_str + " 00:00:00", "%Y-%m-%d %H:%M:%S").replace(tzinfo=BEIJING_TZ)
+        today_end = datetime.strptime(date_str + " 23:59:59", "%Y-%m-%d %H:%M:%S").replace(tzinfo=BEIJING_TZ)
         start_ms = int(today_start.timestamp() * 1000)
         end_ms = int(today_end.timestamp() * 1000)
 
@@ -169,9 +185,9 @@ class DingTalkClient:
                 "offset": offset,
                 "size": 20
             })
-            result = data.get("result", {})
+            result = data["result"]
             has_more = result.get("has_more", False)
-            for leave in result.get("leave_status", []):
+            for leave in result["leave_status"]:
                 uid = leave.get("userid")
                 ls = leave.get("start_time", 0)
                 le = leave.get("end_time", 0)
@@ -210,15 +226,13 @@ class DingTalkClient:
         try:
             col_map = self._resolve_att_columns()
         except Exception as e:
-            print(f"  ⚠ 获取考勤报表列失败，跳过外出检测: {e}")
-            return result
+            raise RuntimeError("获取考勤报表列失败，停止通报") from e
 
         out_col = col_map.get("out_time")
         trip_col = col_map.get("business_trip_time")
         col_ids = [str(c) for c in (out_col, trip_col) if c is not None]
-        if not col_ids:
-            print("  ⚠ 未找到外出/出差报表列，跳过外出检测")
-            return result
+        if out_col is None or trip_col is None:
+            raise RuntimeError("缺少外出/出差报表列，停止通报")
 
         col_str = ",".join(col_ids)
         from_date = min(date_list) + " 00:00:00"
@@ -233,13 +247,13 @@ class DingTalkClient:
                         "from_date": from_date,
                         "to_date": to_date
                     })
-                    for item in data.get("result", {}).get("column_vals", []):
-                        for cv in item.get("column_vals", []):
+                    for item in data["result"]["column_vals"]:
+                        for cv in item["column_vals"]:
                             day = (cv.get("date") or "")[:10]
                             try:
                                 val = float(cv.get("value") or 0)
-                            except (TypeError, ValueError):
-                                val = 0.0
+                            except (TypeError, ValueError) as e:
+                                raise ValueError("外出/出差时长格式异常") from e
                             if day in result and val > 0:
                                 result[day].add(uid)
                     break
@@ -247,7 +261,7 @@ class DingTalkClient:
                     if retry < 2:
                         time.sleep(2)
                     else:
-                        print(f"  ⚠ 外出查询失败({uid}): {e}")
+                        raise RuntimeError(f"外出/出差查询失败：{uid}") from e
             time.sleep(0.15)
 
         return result
@@ -261,7 +275,7 @@ class DingTalkClient:
                 hmac.new(secret.encode(), sign_string.encode(), digestmod=hashlib.sha256).digest()
             ).decode()
         url = webhook_url + f"&timestamp={timestamp}&sign={sign}"
-        resp = requests.post(url, json={"msgtype": "text", "text": {"content": message}})
+        resp = requests.post(url, json={"msgtype": "text", "text": {"content": message}}, timeout=15)
         data = resp.json()
         if data.get("errcode") != 0:
             raise Exception(f"Webhook发送失败: {data.get('errmsg')}")
@@ -283,7 +297,7 @@ def should_skip_today(date_str: str = None) -> tuple:
     返回 (是否跳过, 原因)
     """
     if date_str is None:
-        date_str = datetime.now().strftime("%Y-%m-%d")
+        date_str = datetime.now(BEIJING_TZ).strftime("%Y-%m-%d")
 
     try:
         resp = requests.get(
@@ -313,13 +327,13 @@ def should_skip_today(date_str: str = None) -> tuple:
 
 def format_yesterday() -> str:
     """获取上一个工作日。周一→上周五，其余→昨天。"""
-    today = datetime.now()
+    today = datetime.now(BEIJING_TZ)
     if today.weekday() == 0:  # 周一
         return (today - timedelta(days=3)).strftime("%Y-%m-%d")
     return (today - timedelta(days=1)).strftime("%Y-%m-%d")
 
 def format_today() -> str:
-    return datetime.now().strftime("%Y-%m-%d")
+    return datetime.now(BEIJING_TZ).strftime("%Y-%m-%d")
 
 def names_to_text(names: List[str], fallback: str = "无") -> str:
     return "、".join(names) if names else fallback
@@ -354,7 +368,7 @@ def run_attendance_report() -> dict:
     # 获取今天的打卡记录
     today_records = client.get_attendance_list(today, user_ids)
     if len(today_records) == 0:
-        return {"status": "skipped", "reason": "今日考勤数据获取失败"}
+        raise RuntimeError("今日考勤记录为空，停止通报")
 
     late_today = []
     today_punched = set()
@@ -418,6 +432,9 @@ def run_attendance_report() -> dict:
         except Exception as e:
             send_results.append({"name": g["name"], "status": "failed", "error": str(e)})
 
+    if any(r["status"] == "failed" for r in send_results):
+        raise RuntimeError("群发送失败：" + "、".join(r["name"] for r in send_results if r["status"] == "failed"))
+
     return {
         "status": "ok",
         "report": report,
@@ -439,7 +456,7 @@ def main_handler(event, context):
     """腾讯云函数 SCF 入口"""
     skip, reason = should_skip_today()
     if skip:
-        today_str = datetime.now().strftime("%Y-%m-%d")
+        today_str = datetime.now(BEIJING_TZ).strftime("%Y-%m-%d")
         print(f"{today_str} 是{reason}，跳过考勤通报")
         return {"status": "skipped", "reason": reason}
 
@@ -451,4 +468,4 @@ def main_handler(event, context):
         import traceback
         error_msg = traceback.format_exc()
         print(f"执行失败: {error_msg}")
-        return {"status": "error", "message": str(e)}
+        raise
