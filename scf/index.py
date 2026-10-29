@@ -33,7 +33,6 @@ WHITE_LIST_NAMES = ["陈迪煊"]
 LEAVE_PROCESS_CODE = None
 
 GROUPS = [
-    {"name": "好达团队管理部", "webhook_url": "https://oapi.dingtalk.com/robot/send?access_token=7c605bd0e0dc82f15d9f5e95ab004797d077d38a83db7ebc5a6cbc70c8aec87e", "secret": "SEC2eed60acaf221629aa4f55986d5cec9aa76f526634caec60f4149333ce329e7b"},
     {"name": "好达群", "webhook_url": "https://oapi.dingtalk.com/robot/send?access_token=d67acf704fc0fa194e9d7ac67eb60ad5593794e50d183674367781a5a525253e", "secret": "SECa313aa3c20476e1300f7ea7c884644c8fc47356a5ffb60f89dfabfedc4bf580e"},
 ]
 
