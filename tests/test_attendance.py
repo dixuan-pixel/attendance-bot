@@ -81,7 +81,14 @@ class AttendanceTests(unittest.TestCase):
             sent.append(args)
             if len(sent) == 1: raise RuntimeError('send failed')
         client.send_webhook_message = send
-        with patch.object(bot, 'DingTalkClient', return_value=client), contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+        # 用两个假群验证「一个群失败仍尝试另一个群」，不依赖真实 GROUPS 配置
+        fake_groups = [
+            {'name': '群A', 'webhook_url': 'https://example.invalid/a'},
+            {'name': '群B', 'webhook_url': 'https://example.invalid/b'},
+        ]
+        with patch.object(bot, 'GROUPS', fake_groups), \
+             patch.object(bot, 'DingTalkClient', return_value=client), \
+             contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
             with self.assertRaises(RuntimeError): run()
         self.assertEqual(len(sent), 2)
         if hasattr(bot, 'main_handler'):
