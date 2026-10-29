@@ -1,12 +1,14 @@
 name: 钉钉考勤通报
 
 on:
-  # 仅通过 cron-job.org 的 workflow_dispatch 触发（工作日 09:30 北京时间）
+  # 由 cron-job.org 的 workflow_dispatch 触发（工作日 09:30 北京时间）
+  # 触发后脚本会先等待到 10:00 再发送，见「等待至 10:00」步骤
   workflow_dispatch:
 
 jobs:
   attendance:
     runs-on: ubuntu-latest
+    timeout-minutes: 90
     env:
       TZ: Asia/Shanghai
     steps:
@@ -16,5 +18,22 @@ jobs:
           python-version: '3.11'
       - name: 安装依赖
         run: pip install requests
+      - name: 等待至 10:00 再发送
+        run: |
+          python - <<'PY'
+          import time
+          from datetime import datetime
+          from zoneinfo import ZoneInfo
+
+          now = datetime.now(ZoneInfo("Asia/Shanghai"))
+          target = now.replace(hour=10, minute=0, second=0, microsecond=0)
+          wait = (target - now).total_seconds()
+          if 0 < wait <= 3600:
+              print(f"当前 {now:%H:%M:%S} (北京时间)，等待 {wait/60:.1f} 分钟后于 10:00 发送")
+              time.sleep(wait)
+              print(f"已到 {datetime.now(ZoneInfo('Asia/Shanghai')):%H:%M:%S}，开始发送")
+          else:
+              print(f"当前 {now:%H:%M:%S} (北京时间)，已过 10:00，立即发送")
+          PY
       - name: 运行考勤通报
         run: python dingtalk_attendance_bot.py
