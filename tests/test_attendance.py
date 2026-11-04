@@ -31,6 +31,16 @@ class AttendanceTests(unittest.TestCase):
                     self.check_version(bot)
 
     def check_version(self, bot):
+        self.assertEqual(bot.build_group_report([], [], [], []), "【考勤通报】\n全部正常")
+        # 所有非空组合保留原编号、原人员格式，空项目不出现在群消息中。
+        import itertools
+        titles = ("昨日下班未打卡人员", "今天请假人员", "今天迟到人员", "今天缺勤人员")
+        for flags in itertools.product((False, True), repeat=4):
+            groups = [["甲", "乙"] if flag else [] for flag in flags]
+            message = bot.build_group_report(*groups)
+            for i, (title, flag) in enumerate(zip(titles, flags), 1):
+                self.assertEqual(f"{i}.{title}：\n甲、乙" in message, flag)
+            self.assertEqual("全部正常" in message, not any(flags))
         client = bot.DingTalkClient('fake', 'fake', 0)
         calls = []
         def pages(*args, **kwargs):
@@ -91,6 +101,8 @@ class AttendanceTests(unittest.TestCase):
              contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
             with self.assertRaises(RuntimeError): run()
         self.assertEqual(len(sent), 2)
+        self.assertEqual(sent[0][1], "【考勤通报】\n1.昨日下班未打卡人员：\n甲")
+        self.assertEqual(sent[1][1], sent[0][1])
         if hasattr(bot, 'main_handler'):
             with patch.object(bot, 'should_skip_today', return_value=(False, '')), patch.object(bot, 'run_attendance_report', side_effect=RuntimeError('failed')), contextlib.redirect_stdout(io.StringIO()):
                 with self.assertRaises(RuntimeError): bot.main_handler({}, None)

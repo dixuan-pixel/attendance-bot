@@ -467,6 +467,19 @@ def names_to_text(names: List[str], fallback: str = "无") -> str:
     return "、".join(names) if names else fallback
 
 
+def build_group_report(not_punched_out, leave_names, late_today, absent_today):
+    """只展示有人员的通报项，全部为空时明确报告正常。"""
+    groups = (
+        ("昨日下班未打卡人员", not_punched_out),
+        ("今天请假人员", leave_names),
+        ("今天迟到人员", late_today),
+        ("今天缺勤人员", absent_today),
+    )
+    sections = [f"{i}.{title}：\n{names_to_text(names)}"
+                for i, (title, names) in enumerate(groups, 1) if names]
+    return "【考勤通报】\n" + ("\n\n".join(sections) if sections else "全部正常")
+
+
 # ========== 主函数 ==========
 
 def main(send_messages: bool = True):
@@ -589,14 +602,18 @@ def main(send_messages: bool = True):
             print("网页快照已生成，不发送群消息")
             return
         
+        # 完整日志保留给网页看板解析，群消息仅展示异常。
+        group_report = (build_group_report(not_punched_out, leave_names, late_today, absent_today)
+                        if user_ids else report)
+
         # 步骤6: 发送到群
         failed_groups = []
         for g in GROUPS:
             try:
                 if "webhook_url" in g:
-                    client.send_webhook_message(g["webhook_url"], report.strip(), g.get("secret", ""))
+                    client.send_webhook_message(g["webhook_url"], group_report.strip(), g.get("secret", ""))
                 else:
-                    client.send_group_message(g["chat_id"], report.strip())
+                    client.send_group_message(g["chat_id"], group_report.strip())
                 print(f"  ✅ 已发送到: {g['name']}")
                 time.sleep(1)  # 避免触发限流
             except Exception as e:

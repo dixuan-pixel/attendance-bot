@@ -338,6 +338,19 @@ def names_to_text(names: List[str], fallback: str = "无") -> str:
     return "、".join(names) if names else fallback
 
 
+def build_group_report(not_punched_out, leave_names, late_today, absent_today):
+    """只展示有人员的通报项，全部为空时明确报告正常。"""
+    groups = (
+        ("昨日下班未打卡人员", not_punched_out),
+        ("今天请假人员", leave_names),
+        ("今天迟到人员", late_today),
+        ("今天缺勤人员", absent_today),
+    )
+    sections = [f"{i}.{title}：\n{names_to_text(names)}"
+                for i, (title, names) in enumerate(groups, 1) if names]
+    return "【考勤通报】\n" + ("\n\n".join(sections) if sections else "全部正常")
+
+
 # ========== 核心逻辑 ==========
 
 def run_attendance_report() -> dict:
@@ -407,19 +420,7 @@ def run_attendance_report() -> dict:
         leave_names = [n for n in leave_names if n not in white_set]
 
     # 步骤5: 生成通报
-    report = f"""【考勤通报】
-1.昨日下班未打卡人员：
-{names_to_text(not_punched_out)}
-
-2.今天请假人员：
-{names_to_text(leave_names)}
-
-3.今天迟到人员：
-{names_to_text(late_today)}
-
-4.今天缺勤人员：
-{names_to_text(absent_today)}
-"""
+    report = build_group_report(not_punched_out, leave_names, late_today, absent_today)
 
     # 步骤6: 发送
     send_results = []
